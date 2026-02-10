@@ -9,8 +9,8 @@ A **self-hosted privacy infrastructure** that provides **network-wide ad blockin
 ---
 
 ## 🌍 Languages
-- [EN](#english)
-- [TR](#turkce)
+- [English](#english)
+- [Türkçe](#turkce)
 
 ---
 <a name="english"></a>
