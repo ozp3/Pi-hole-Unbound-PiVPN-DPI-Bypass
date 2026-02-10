@@ -10,11 +10,11 @@ A **self-hosted privacy infrastructure** that provides **network-wide ad blockin
 
 ## 🌍 Languages
 
-* 🇬🇧 English (below)
-* 🇹🇷 Türkçe (scroll down)
+* 🇬🇧 English
+* 🇹🇷 Türkçe
 
 ---
-
+<a name="english"></a>
 # 🇬🇧 English Guide
 
 ## ✨ Features
@@ -232,7 +232,7 @@ dig google.com @127.0.0.1 -p 5335
 If you don’t run your own DNS, you don’t own your internet.
 
 ---
-
+<a name="turkce"></a>
 # 🇹🇷 Türkçe Rehber
 
 *(Aşağıdaki bölüm, yukarıdaki yapının birebir Türkçe karşılığıdır.)*
