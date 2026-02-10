@@ -9,13 +9,12 @@ A **self-hosted privacy infrastructure** that provides **network-wide ad blockin
 ---
 
 ## 🌍 Languages
-
-* 🇬🇧 English
-* 🇹🇷 Türkçe
+- [EN](#english)
+- [TR](#turkce)
 
 ---
 <a name="english"></a>
-# 🇬🇧 English Guide
+# English Guide
 
 ## ✨ Features
 
@@ -233,7 +232,7 @@ If you don’t run your own DNS, you don’t own your internet.
 
 ---
 <a name="turkce"></a>
-# 🇹🇷 Türkçe Rehber
+# Türkçe Rehber
 
 *(Aşağıdaki bölüm, yukarıdaki yapının birebir Türkçe karşılığıdır.)*
 
