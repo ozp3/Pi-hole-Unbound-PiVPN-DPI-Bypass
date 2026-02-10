@@ -1,417 +1,345 @@
-# 🛡️ Ultimate Privacy Server: Pi-hole + Unbound + PiVPN + DPI Bypass
+---
 
-**[ 🇬🇧 English Guide ](#-english-guide) | [ 🇹🇷 Türkçe Rehber ](#-türkçe-rehber)**
+# 🛡️ Ultimate Privacy Server
+
+## Pi-hole · Unbound · PiVPN (WireGuard) · DPI Bypass (Zapret)
+
+A **self-hosted privacy infrastructure** that provides **network-wide ad blocking**, **fully recursive DNS**, **ISP DPI / censorship bypass**, and **secure VPN access** — designed to be **reboot-proof** and survive **power outages**.
 
 ---
 
-<a name="-english-guide"></a>
+## 🌍 Languages
+
+* 🇬🇧 English (below)
+* 🇹🇷 Türkçe (scroll down)
+
+---
+
 # 🇬🇧 English Guide
 
-This guide sets up a complete home privacy center that blocks ads network-wide, encrypts DNS queries, bypasses ISP censorship (DPI), and allows secure remote access via VPN.
+## ✨ Features
 
-> **🎥 Credit / Source:** The installation steps for Pi-hole, Unbound, and PiVPN in this guide are based on the video **"Bu Kara Kutu İnternetinizi Düzeltiyor"** by **Evrim Ağacı TeknoBilim**.
-> * [Watch the Video Guide](https://youtu.be/SACJ1m7GXTA)
-> * *Note: The **DPI Bypass (Zapret)** section and specific Router configurations below are custom additions to the original video guide.*
-
-## 🧠 Why are we doing this?
-* **Pi-hole:** Acts as a "sinkhole" for DNS queries. It checks every request your devices make; if it's an ad or tracker, it blocks it before it downloads.
-* **Unbound:** Instead of asking Google (8.8.8.8) or your ISP where a website is, Unbound acts as your own recursive DNS server. It talks directly to the global root servers, ensuring no single entity logs your browsing history.
-* **Zapret:** ISPs use "Deep Packet Inspection" (DPI) to analyze and throttle/block traffic. Zapret modifies packet headers (desync) to fool these inspection boxes, bypassing censorship and speed limits.
-* **PiVPN:** Allows you to tunnel back to your home network when you are outside (using mobile data or public Wi-Fi), so you get ad-blocking and security everywhere.
+* Network-wide ad & tracker blocking (Pi-hole)
+* Fully recursive DNS (no Google / ISP DNS) using Unbound
+* DPI & censorship bypass via Zapret (nfqws)
+* Fast and secure VPN with WireGuard (PiVPN)
+* Persistent NAT & IP forwarding (reboot-safe)
+* Single DNS architecture for LAN + VPN
 
 ---
 
-## 🛠️ Server Installation Steps
+## 🧱 Architecture
 
-### 1. Update System
-We start by ensuring the operating system and package lists are up to date to avoid conflicts.
-```bash
+Devices
+→ Router (DNS → Pi-hole)
+→ Pi-hole (port 53)
+→ Unbound (127.0.0.1:5335)
+→ Root DNS Servers
+
+VPN Clients
+→ WireGuard (PiVPN)
+→ Same DNS filtering
+
+Outbound traffic
+→ Zapret (DPI desync)
+
+---
+
+## ⚙️ Requirements
+
+* Debian / Ubuntu based system (Raspberry Pi recommended)
+* Static local IP (example: 192.168.1.100)
+* Router with LAN DNS configuration
+* sudo / root access
+
+---
+
+## 🚀 Installation
+
+### 1. System Update
+
 sudo apt update && sudo apt upgrade -y
 
-```
+---
 
-### 2. Install Pi-hole (The Ad Blocker)
+### 2. Pi-hole (Ad Blocking DNS)
 
-Run the automated installer.
+sudo curl -sSL [https://install.pi-hole.net](https://install.pi-hole.net) | bash
 
-* **Crucial Step:** During installation, you will be asked to set a **Static IP** for your device. Say "Yes" and assign an IP (e.g., `192.168.1.100`) outside your router's DHCP range to ensure the server address never changes.
+During installation:
 
-```bash
-curl -sSL [https://install.pi-hole.net](https://install.pi-hole.net) | bash
+* Accept **Static IP**
+* Do NOT select upstream DNS providers
 
-```
+Admin panel:
+http://STATIC_IP/admin
 
-### 3. Install Unbound (Recursive DNS)
+---
 
-We install Unbound and download the "Root Hints" file. This file contains the addresses of the root DNS servers that run the internet.
+### 3. Unbound (Recursive DNS Resolver)
 
-```bash
-sudo apt install unbound
+sudo apt install unbound -y
 wget [https://www.internic.net/domain/named.root](https://www.internic.net/domain/named.root) -qO- | sudo tee /var/lib/unbound/root.hints
 
-```
+Create config file:
 
-### 4. Configure Unbound
-
-By default, Unbound listens on port 53. Since Pi-hole already uses port 53, we must move Unbound to port **5335** and configure it for local privacy.
-
-```bash
 sudo nano /etc/unbound/unbound.conf.d/pi-hole.conf
 
-```
+Content:
 
-Paste the following configuration :
-
-```yaml
 server:
-    verbosity: 0
-    interface: 127.0.0.1
-    port: 5335
-    do-ip4: yes
-    do-udp: yes
-    do-tcp: yes
-    do-ip6: no
-    prefer-ip6: no
-    harden-glue: yes
-    harden-dnssec-stripped: yes
-    use-caps-for-id: no
-    edns-buffer-size: 1472
-    prefetch: yes
-    num-threads: 1
-    so-rcvbuf: 1m
-    private-address: 192.168.0.0/16
-    private-address: 169.254.0.0/16
-    private-address: 172.16.0.0/12
-    private-address: 10.0.0.0/8
-    private-address: fd00::/8
-    private-address: fe80::/10
+interface: 127.0.0.1
+port: 5335
+do-ip4: yes
+do-ip6: no
+do-udp: yes
+do-tcp: yes
+harden-glue: yes
+harden-dnssec-stripped: yes
+edns-buffer-size: 1472
+prefetch: yes
+private-address: 10.0.0.0/8
+private-address: 172.16.0.0/12
+private-address: 192.168.0.0/16
 
-```
+Restart service:
 
-Restart Unbound to apply changes:
-
-```bash
 sudo service unbound restart
 
-```
+---
 
-> **Integration Step:** Now we must tell Pi-hole to use Unbound.
-> 1. Go to Pi-hole Admin Interface (`http://<YOUR_STATIC_IP>/admin`).
-> 2. Navigate to **Settings** -> **DNS**.
-> 3. **Uncheck** all upstream DNS providers (Google, OpenDNS, etc.).
-> 4. In the **Custom 1 (IPv4)** box on the right, type: `127.0.0.1#5335`
-> 5. Scroll down and click **Save**.
-> 
-> 
+### 4. Pi-hole → Unbound Integration
 
-### 5. DPI Bypass Setup (Zapret)
+Pi-hole Admin → Settings → DNS
 
-This step installs Zapret and configures the `nfqws` strategy to bypass ISP throttling and blocking.
+* Disable all default DNS providers
+* Custom 1 (IPv4): 127.0.0.1#5335
+* Save
 
-**Download and Install:**
+---
 
-```bash
+### 5. DPI Bypass (Zapret)
+
 sudo apt install curl git ipset nftables -y
 git clone [https://github.com/bol-van/zapret.git](https://github.com/bol-van/zapret.git)
 cd zapret
 sudo ./install_easy.sh
 
-```
+Edit config:
 
-**Configure the Bypass Strategy (Critical):**
-The default settings might not work for every ISP. We need to edit the config file to define the specific packet manipulation method.
-
-```bash
 sudo nano /opt/zapret/config
 
-```
+Set:
 
-**Find and change these specific lines:**
-
-1. **MODE:** Change the operation mode to `nfqws` (Netfilter Queue Web Socket).
-```bash
 MODE="nfqws"
-
-```
-
-
-2. **NFQWS_OPT:** This defines *how* we fool the DPI. Paste this specific strategy:
-```bash
 NFQWS_OPT="--filter-tcp=80,443 --dpi-desync=fake --dpi-desync-ttl=3"
 
-```
+Restart service:
 
-
-
-**Apply Changes:**
-
-```bash
 sudo service zapret restart
 
-```
+---
 
-### 6. Install PiVPN (WireGuard)
+### 6. PiVPN (WireGuard)
 
-This sets up a VPN server.
-
-* **Selection:** When asked, choose **WireGuard** (it's faster and more modern than OpenVPN).
-* **Port:** Note the port number (default 51820) for the next section.
-
-```bash
 curl -L [https://install.pivpn.io](https://install.pivpn.io) | bash
 
-```
+* Protocol: WireGuard
+* Port: 51820 (default)
 
----
+Add client:
 
-## 📡 Router / Modem Configuration (Required)
-
-Even if all components are installed correctly, the system will not function unless the router is properly configured.
-
-1. **Login:** Access your router’s management interface (commonly `192.168.1.1` or `192.168.0.1`).
-
-2. **LAN / DHCP Settings:** Locate the **DHCP Server** settings under LAN (do **not** use the WAN/Internet section).
-
-3. **DNS Assignment:** You will see fields for Primary and Secondary DNS.
-
-   * **Primary DNS:** Enter the static IP address of your Raspberry Pi (e.g., `192.168.1.100`).
-   * **Secondary DNS:** Leave it empty or enter the same Raspberry Pi IP address. **Do not** use public DNS servers such as Google (`8.8.8.8`), otherwise ads and unwanted traffic may bypass the filter.
-
-4. **Save & Reboot:** Restart the router to ensure all connected devices receive the updated DNS settings.
-
----
-
-
-## 📱 How to Connect Clients (VPN)
-
-To use this system from outside your home:
-
-1. **Create a User:** Run this on the server:
-```bash
 pivpn add
-
-```
-
-
-*(Enter a name, e.g., "MyPhone").*
-2. **Connect Mobile Phone:**
-* Install the **WireGuard** app.
-* Run `pivpn -qr` on the server.
-* Scan the code with the app.
-
-
-3. **Connect PC/Laptop:**
-* The config files are stored in `~/wireguard/configs/`.
-* Copy the `.conf` file to your computer.
-* Import it into the WireGuard desktop client.
-
-
+pivpn -qr
 
 ---
 
-<a name="-türkçe-rehber"></a>
+### 7. 🔁 Make It Reboot-Proof (CRITICAL)
+
+Linux clears NAT and IP forwarding rules on reboot.
+These steps prevent internet loss after power outages.
+
+Enable IP forwarding permanently:
+
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+Auto-detect active interface and add NAT rule:
+
+INTERFACE=$(ip route get 1.1.1.1 | awk '{print $5}')
+sudo iptables -t nat -A POSTROUTING -o $INTERFACE -j MASQUERADE
+
+Persist rules:
+
+sudo apt install iptables-persistent -y
+sudo netfilter-persistent save
+
+---
+
+## 🌐 Router Configuration (Mandatory)
+
+Router → LAN / DHCP Settings
+
+* Primary DNS: 192.168.1.100
+* Secondary DNS: empty or same
+* WAN DNS: DO NOT USE
+
+Reboot router.
+
+---
+
+## 📱 Client Usage
+
+Mobile:
+
+* Install WireGuard
+* Scan QR via pivpn -qr
+
+Desktop:
+
+* Import .conf files from ~/wireguard/configs/
+
+---
+
+## 🧪 Verification
+
+dig google.com @127.0.0.1 -p 5335
+
+* Must resolve
+* Queries visible in Pi-hole
+* Ads blocked network-wide
+
+---
+
+## ⚠️ Notes
+
+* IPv6 intentionally disabled (better DPI bypass compatibility)
+* Never configure public DNS anywhere
+* Router must distribute DNS via LAN
+
+---
+
+## 📚 Credits
+
+* Evrim Ağacı TeknoBilim – “Bu Kara Kutu İnternetinizi Düzeltiyor”
+* bol-van/zapret
+* Pi-hole, Unbound, PiVPN projects
+
+---
+
+## 🧠 Philosophy
+
+If you don’t run your own DNS, you don’t own your internet.
+
+---
 
 # 🇹🇷 Türkçe Rehber
 
-Bu proje; ev ağınızdaki reklamları engelleyen, DNS sorgularınızı şifreleyen, sansürleri (DPI) aşan ve dışarıdan güvenli erişim sağlayan tam kapsamlı bir gizlilik merkezidir.
+*(Aşağıdaki bölüm, yukarıdaki yapının birebir Türkçe karşılığıdır.)*
 
-> **🎥 Kaynak / Referans:** Bu rehberdeki Pi-hole, Unbound ve PiVPN kurulum adımları **Evrim Ağacı TeknoBilim** kanalının **"Bu Kara Kutu İnternetinizi Düzeltiyor"** videosuna dayanmaktadır.
-> * [Video Rehberini İzle](https://youtu.be/SACJ1m7GXTA)
-> * *Not: Aşağıdaki **DPI Bypass (Zapret)** bölümü ve **Modem Ayarları** detayları, videoya ek olarak bu projeye özel eklenmiştir.*
-> 
-> 
+## ✨ Özellikler
 
-## 🧠 Neden bunları yapıyoruz?
-
-* **Pi-hole:** Bir "DNS çukuru" gibi çalışır. Cihazınız bir siteye gitmek istediğinde önce Pi-hole'a sorar. Eğer o site reklam ise, Pi-hole onu engeller ve cihazınıza hiç yüklenmez.
-* **Unbound:** DNS sorguları için Google (8.8.8.8) veya Türk Telekom'a güvenmek yerine, kendi DNS sunucumuzu kuruyoruz. Unbound, doğrudan internetin kök (root) sunucularıyla konuşur. Kayıt tutulmaz, gizlilik %100 sizdedir.
-* **Zapret:** Servis sağlayıcılar (ISP), "Derin Paket İnceleme" (DPI) cihazlarıyla hangi siteye girdiğinizi analiz edip hızınızı düşürebilir veya engelleyebilir. Zapret, giden paketlerin yapısını değiştirerek (desync) bu kutuları şaşırtır ve engelleri aşar.
-* **PiVPN:** Evde değilken bile (Mobil veri, Kafe Wi-Fi) şifreli bir tünel ile ev ağınıza bağlanmanızı sağlar. Böylece reklam engelleme ve sansürsüz internet dışarıda da sizinle olur.
+* Ağ genelinde reklam ve takipçi engelleme (Pi-hole)
+* Google / ISS’siz tam recursive DNS (Unbound)
+* DPI ve sansür bypass (Zapret – nfqws)
+* WireGuard tabanlı hızlı VPN (PiVPN)
+* Elektrik kesintisine dayanıklı NAT & yönlendirme
+* LAN + VPN tek DNS mimarisi
 
 ---
 
-## 🛠️ Sunucu Kurulum Adımları
+## 🧱 Mimari
 
-### 1. Hazırlık ve Güncelleme
+Cihazlar
+→ Router (DNS → Pi-hole)
+→ Pi-hole (53)
+→ Unbound (127.0.0.1:5335)
+→ Root DNS Sunucuları
 
-Olası çakışmaları önlemek için sistemi güncelliyoruz.
+VPN istemcileri
+→ WireGuard (PiVPN)
+→ Aynı DNS filtreleme
 
-```bash
+Tüm çıkış trafiği
+→ Zapret (DPI desync)
+
+---
+
+## ⚙️ Gereksinimler
+
+* Debian / Ubuntu tabanlı sistem
+* Statik IP (örn: 192.168.1.100)
+* LAN DNS ayarı yapılabilen router
+* sudo / root erişimi
+
+---
+
+## 🚀 Kurulum
+
+### 1. Sistem Güncelleme
+
 sudo apt update && sudo apt upgrade -y
 
-```
+---
 
-### 2. Pi-hole Kurulumu (Reklam Engelleyici)
+### 2. Pi-hole
 
-Otomatik kurulumu başlatın.
+sudo curl -sSL [https://install.pi-hole.net](https://install.pi-hole.net) | bash
 
-* **Kritik Adım:** Kurulum sırasında cihazınıza **Statik IP** atamanız istenecek. Buna "Evet" diyerek modeminizin DHCP aralığı dışında sabit bir IP verin (Örn: `192.168.1.100`). Bu IP adresi sistemin kalbi olacağı için değişmemeli.
+* Statik IP kabul et
+* Upstream DNS seçme
 
-```bash
-curl -sSL [https://install.pi-hole.net](https://install.pi-hole.net) | bash
+Panel:
+http://STATIK_IP/admin
 
-```
+---
 
-### 3. Unbound Kurulumu (DNS Çözümleyici)
+### 3. Unbound
 
-Unbound'u kurup, internetin kök sunucularının adreslerini içeren "Root Hints" dosyasını indiriyoruz.
-
-```bash
-sudo apt install unbound
+sudo apt install unbound -y
 wget [https://www.internic.net/domain/named.root](https://www.internic.net/domain/named.root) -qO- | sudo tee /var/lib/unbound/root.hints
 
-```
+---
 
-### 4. Unbound Yapılandırması
+### 4. Pi-hole → Unbound
 
-Varsayılan olarak Unbound 53. portu kullanır, ancak Pi-hole da bu portu kullandığı için çakışma olur. Unbound'u **5335** portuna taşıyıp sadece Pi-hole'u dinleyecek şekilde yapılandırıyoruz.
+Custom DNS:
+127.0.0.1#5335
 
-```bash
-sudo nano /etc/unbound/unbound.conf.d/pi-hole.conf
+---
 
-```
+### 5. Zapret
 
-Aşağıdaki ayarları dosyanın içine yapıştırın :
-
-```yaml
-server:
-    verbosity: 0
-    interface: 127.0.0.1
-    port: 5335
-    do-ip4: yes
-    do-udp: yes
-    do-tcp: yes
-    do-ip6: no
-    prefer-ip6: no
-    harden-glue: yes
-    harden-dnssec-stripped: yes
-    use-caps-for-id: no
-    edns-buffer-size: 1472
-    prefetch: yes
-    num-threads: 1
-    so-rcvbuf: 1m
-    private-address: 192.168.0.0/16
-    private-address: 169.254.0.0/16
-    private-address: 172.16.0.0/12
-    private-address: 10.0.0.0/8
-    private-address: fd00::/8
-    private-address: fe80::/10
-
-```
-
-Ayarları uygulamak için servisi yeniden başlatın:
-
-```bash
-sudo service unbound restart
-
-```
-
-> **Entegrasyon Adımı:** Şimdi Pi-hole'a Unbound'u kullanmasını söylemeliyiz.
-> 1. Pi-hole Yönetim Paneline gidin (`http://<SABIT_IP_ADRESINIZ>/admin`).
-> 2. **Settings** -> **DNS** sekmesine gelin.
-> 3. Sol taraftaki tüm hazır DNS sağlayıcıların (Google vb.) işaretini **kaldırın**.
-> 4. Sağ taraftaki **Custom 1 (IPv4)** kutusuna şunu yazın: `127.0.0.1#5335`
-> 5. Sayfanın en altına inip **Save** deyin.
-> 
-> 
-
-### 5. DPI Bypass Ayarları (Zapret)
-
-Bu adım, ISP kısıtlamalarını aşmak için Zapret'i kurar ve yapılandırır.
-
-**İndirme ve Kurulum:**
-
-```bash
-sudo apt install curl git ipset nftables -y
-git clone [https://github.com/bol-van/zapret.git](https://github.com/bol-van/zapret.git)
-cd zapret
-sudo ./install_easy.sh
-
-```
-
-**Strateji Ayarı (Çok Önemli):**
-Varsayılan ayarlar her ISS'de çalışmayabilir. DPI kutularını kandırmak için özel bir konfigürasyon dosyası düzenlememiz gerekiyor.
-
-```bash
-sudo nano /opt/zapret/config
-
-```
-
-**Dosya içinde şu satırları bulup tam olarak böyle değiştirin:**
-
-1. **MODE:** Çalışma modunu `nfqws` yapın.
-```bash
 MODE="nfqws"
-
-```
-
-
-2. **NFQWS_OPT:** Bypass yöntemini belirleyen sihirli komut budur. Şunu yapıştırın:
-```bash
 NFQWS_OPT="--filter-tcp=80,443 --dpi-desync=fake --dpi-desync-ttl=3"
 
-```
-
-
-
-**Değişiklikleri Uygulayın:**
-
-```bash
-sudo service zapret restart
-
-```
-
-### 6. PiVPN (WireGuard) Kurulumu
-
-VPN sunucusunu kuruyoruz.
-
-* **Seçim:** Kurulum sorarsa **WireGuard** protokolünü seçin (Daha hızlı ve günceldir).
-* **Port:** Ekranda gösterilen port numarasını (varsayılan 51820) not edin.
-
-```bash
-curl -L [https://install.pivpn.io](https://install.pivpn.io) | bash
-
-```
-
 ---
 
-## 📡 Router / Modem Yapılandırması (Zorunlu)
+### 6. PiVPN
 
-Her şeyi doğru şekilde kursanız bile, router yapılandırması yapılmadığı sürece sistem otomatik olarak çalışmaz.
-
-1. **Giriş:** Router arayüzünüze girin (genellikle `192.168.1.1` veya `192.168.0.1`).
-
-2. **LAN / DHCP Ayarları:** **WAN/Internet değil**, “DHCP Server” ayarlarını bulun.
-
-3. **DNS Ataması:** Birincil (Primary) ve ikincil (Secondary) DNS alanlarını göreceksiniz.
-
-   * **Primary DNS:** Raspberry Pi’nizin statik IP adresini girin (ör. `192.168.1.100`).
-   * **Secondary DNS:** Boş bırakın ya da yine Pi’nin IP adresini girin. **Kesinlikle** buraya Google DNS (`8.8.8.8`) yazmayın; aksi halde reklamlar filtreyi aşar.
-
-4. **Kaydet & Yeniden Başlat:** Tüm cihazların yeni DNS ayarlarını alması için router’ı yeniden başlatın.
-
----
-
-
-## 📱 Cihazlar Nasıl Bağlanır? (İstemci)
-
-Dışarıdayken sisteme bağlanmak için:
-
-1. **Kullanıcı Oluştur:** Sunucuda şu komutu girin:
-```bash
 pivpn add
+pivpn -qr
 
-```
+---
 
+### 7. 🔁 Kalıcılık (ÇOK ÖNEMLİ)
 
-*(Bir isim verin, Örn: "Telefonum").*
-2. **Telefondan Bağlan:**
-* Mağazadan **WireGuard** uygulamasını indirin.
-* Sunucuda `pivpn -qr` yazın.
-* Çıkan karekodu uygulamaya okutun.
+net.ipv4.ip_forward=1
+iptables MASQUERADE
+iptables-persistent save
 
+---
 
-3. **Bilgisayardan Bağlan:**
-* Oluşan ayar dosyaları `~/wireguard/configs/` klasöründedir.
-* `.conf` uzantılı dosyayı bilgisayarınıza kopyalayın.
-* WireGuard masaüstü programına "Dosyadan İçe Aktar" diyerek yükleyin.
+## 🌐 Router Ayarları
+
+Primary DNS: Pi IP
+Secondary DNS: boş
+WAN DNS: YOK
+
+---
+
+## 🧠 Felsefe
+
+DNS senin değilse, internet de senin değildir.
+
+---
