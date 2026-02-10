@@ -11,6 +11,7 @@ A **self-hosted privacy infrastructure** that provides **network-wide ad blockin
 ## 🌍 Languages
 
 * [English](#english)
+* [中文](#chinese)
 * [Türkçe](#turkce)
 
 ---
@@ -497,6 +498,414 @@ ps aux | grep -E "nfqws|zapret" | grep -v grep
 
 ```text
 If you don’t run your own DNS, you don’t own your internet.
+```
+
+---
+
+<a name="chinese"></a>
+
+# 中文指南 (Chinese Guide)
+
+## ✨ 功能
+
+* 全网广告与追踪器拦截（Pi-hole）
+* 使用 Unbound 实现完全递归 DNS（不依赖 Google/运营商 DNS）
+* 通过 Zapret（nfqws）实现 DPI/审查绕过
+* 使用 WireGuard（PiVPN）提供高速安全 VPN
+* NAT 与 IP 转发持久化（重启不丢）
+* 局域网 + VPN 客户端统一 DNS 架构
+
+---
+
+## 🧱 架构
+
+```text
+设备
+→ 路由器（DNS → Pi-hole）
+→ Pi-hole（53 端口）
+→ Unbound（127.0.0.1:5335）
+→ 根 DNS 服务器
+
+VPN 客户端
+→ WireGuard（PiVPN）
+→ 同样的 DNS 过滤
+
+所有出口流量
+→ Zapret（DPI 反制 / desync）
+
+重要（DPI 绕过前提）：
+→ 局域网客户端的流量必须经过本服务器（运行 Zapret 的主机）。
+   这意味着客户端的默认网关需要指向服务器
+   （或由路由器使用策略路由把指定流量转发到服务器）。
+```
+
+---
+
+## ⚙️ 环境要求
+
+* Debian/Ubuntu 系统（推荐 Raspberry Pi）
+* 服务器使用静态 IP（例如：`192.168.1.100`）
+* 路由器支持配置 LAN DNS / DHCP
+* **（DPI 绕过）需要网络路由让客户端以服务器作为网关**
+* sudo / root 权限
+
+---
+
+## 🚀 安装
+
+### 1) 系统更新
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+---
+
+### 2) 安装 Pi-hole（广告拦截 DNS）
+
+安装：
+
+```bash
+sudo curl -sSL https://install.pi-hole.net | bash
+```
+
+安装过程中：
+
+* 接受 **静态 IP**
+* **不要**选择上游 DNS 提供商（后续使用 Unbound）
+
+管理面板：
+
+```text
+http://STATIC_IP/admin
+```
+
+状态检查（可选）：
+
+```bash
+pihole status
+```
+
+---
+
+### 3) 安装 Unbound（递归 DNS）
+
+安装并获取 root hints：
+
+```bash
+sudo apt install unbound -y
+wget https://www.internic.net/domain/named.root -qO- | sudo tee /var/lib/unbound/root.hints
+```
+
+创建配置文件：
+
+```bash
+sudo nano /etc/unbound/unbound.conf.d/pi-hole.conf
+```
+
+粘贴内容：
+
+```conf
+server:
+  interface: 127.0.0.1
+  port: 5335
+
+  do-ip4: yes
+  do-ip6: no
+  do-udp: yes
+  do-tcp: yes
+
+  harden-glue: yes
+  harden-dnssec-stripped: yes
+  edns-buffer-size: 1472
+  prefetch: yes
+
+  private-address: 10.0.0.0/8
+  private-address: 172.16.0.0/12
+  private-address: 192.168.0.0/16
+```
+
+保存并退出：
+
+```text
+Ctrl + O  → Enter  → Ctrl + X
+```
+
+检查配置（推荐）：
+
+```bash
+sudo unbound-checkconf
+```
+
+重启并检查：
+
+```bash
+sudo service unbound restart
+sudo service unbound status
+```
+
+直接测试 Unbound：
+
+```bash
+dig google.com @127.0.0.1 -p 5335
+```
+
+---
+
+### 4) Pi-hole → Unbound 绑定
+
+打开 Pi-hole 面板：
+
+```text
+http://STATIC_IP/admin
+```
+
+路径：
+
+```text
+Settings → DNS
+```
+
+操作：
+
+* 关闭所有默认上游 DNS
+* 在 **Custom 1 (IPv4)** 中填写：
+
+```text
+127.0.0.1#5335
+```
+
+保存。
+
+可选验证：
+
+```bash
+dig google.com @127.0.0.1
+```
+
+---
+
+## 🌐 DPI 绕过的网关要求（关键）
+
+Zapret `nfqws` 只对**经过服务器的流量**生效。
+如果局域网客户端直接通过路由器/运营商出网，DPI 绕过不会生效。
+
+你必须确保：**客户端默认网关指向服务器**（或路由器做策略路由把流量转发到服务器）。
+
+### 方案 A（推荐）：DHCP 下发服务器作为默认网关
+
+在路由器 DHCP/LAN 设置中配置：
+
+```text
+Default Gateway / Router / Gateway: 192.168.1.100   (服务器 IP)
+Primary DNS:                     192.168.1.100   (服务器 IP)
+Secondary DNS:                   留空（或同上）
+```
+
+然后让客户端更新 DHCP（或重启）。
+
+客户端验证默认路由：
+
+* Windows：
+
+```bat
+ipconfig /all
+```
+
+* Linux/macOS：
+
+```bash
+ip route | head
+```
+
+期望看到：
+
+```text
+default via 192.168.1.100
+```
+
+### 方案 B（高级）：路由器策略路由（PBR）
+
+若不希望全网改网关，可在路由器上将特定设备或端口（例如 `80/443`）通过 `192.168.1.100` 转发。
+
+（具体配置因路由器固件而异。）
+
+---
+
+### 5) 安装 Zapret（DPI Bypass）
+
+安装依赖：
+
+```bash
+sudo apt update
+sudo apt install curl git ipset nftables -y
+```
+
+下载并安装：
+
+```bash
+cd ~
+git clone https://github.com/bol-van/zapret.git
+cd zapret
+sudo ./install_easy.sh
+```
+
+编辑配置：
+
+```bash
+sudo nano /opt/zapret/config
+```
+
+在文件中找到（`Ctrl + W` 搜索）并设置以下变量；如果不存在，就添加：
+
+```conf
+MODE="nfqws"
+NFQWS_OPT="--filter-tcp=80,443 --dpi-desync=fake --dpi-desync-ttl=3"
+```
+
+保存并退出：
+
+```text
+Ctrl + O  → Enter  → Ctrl + X
+```
+
+重启并检查：
+
+```bash
+sudo service zapret restart
+sudo service zapret status
+```
+
+确认进程（可选）：
+
+```bash
+ps aux | grep -E "nfqws|zapret" | grep -v grep
+```
+
+查看日志（可选）：
+
+```bash
+sudo journalctl -u zapret -n 200 --no-pager
+```
+
+---
+
+### 6) 安装 PiVPN（WireGuard）
+
+安装：
+
+```bash
+curl -L https://install.pivpn.io | bash
+```
+
+安装时：
+
+* 协议：**WireGuard**
+* 端口：`51820`（默认）
+
+添加客户端：
+
+```bash
+pivpn add
+pivpn -qr
+```
+
+可选：列出客户端：
+
+```bash
+pivpn list
+```
+
+---
+
+### 7) 🔁 重启不丢（关键）
+
+开启 IPv4 转发（永久）：
+
+```bash
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+验证：
+
+```bash
+sysctl net.ipv4.ip_forward
+```
+
+自动识别出口网卡并添加 NAT：
+
+```bash
+INTERFACE=$(ip route get 1.1.1.1 | awk '{print $5}')
+echo "$INTERFACE"
+sudo iptables -t nat -A POSTROUTING -o "$INTERFACE" -j MASQUERADE
+```
+
+验证规则（推荐）：
+
+```bash
+sudo iptables -t nat -S POSTROUTING
+```
+
+持久化：
+
+```bash
+sudo apt install iptables-persistent -y
+sudo netfilter-persistent save
+sudo netfilter-persistent reload
+```
+
+---
+
+## 🌐 路由器配置（必须）
+
+路由器 → LAN / DHCP 设置
+
+### DNS（必须）
+
+```text
+Primary DNS:   192.168.1.100
+Secondary DNS: 留空（或同上）
+WAN DNS:       不要配置
+```
+
+### 网关（DPI 绕过必须）
+
+```text
+Default Gateway / Router / Gateway: 192.168.1.100
+```
+
+重启路由器并让客户端更新 DHCP。
+
+---
+
+## 🧪 验证
+
+DNS：
+
+```bash
+dig google.com @127.0.0.1 -p 5335
+dig google.com @127.0.0.1
+```
+
+网关（DPI 前提）：
+
+* Windows：
+
+```bat
+ipconfig /all
+```
+
+* Linux/macOS：
+
+```bash
+ip route | head
+```
+
+期望：
+
+```text
+default via 192.168.1.100
 ```
 
 ---
